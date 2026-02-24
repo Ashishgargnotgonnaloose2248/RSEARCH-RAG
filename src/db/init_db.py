@@ -7,6 +7,14 @@ def init_db():
     with open("src/db/schema.sql", "r") as f:
         cur.execute(f.read())
 
+    # Ensure new columns exist in case the table was created before schema update
+    cur.execute(
+        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS citation_count INT DEFAULT 0;"
+    )
+    cur.execute(
+        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS reference_count INT DEFAULT 0;"
+    )
+
     conn.commit()
     cur.close()
     conn.close()

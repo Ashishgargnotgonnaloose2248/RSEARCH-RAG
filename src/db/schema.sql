@@ -2,7 +2,9 @@ CREATE TABLE IF NOT EXISTS papers (
     paper_id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     abstract TEXT,
-    year INT
+    year INT,
+    citation_count INT DEFAULT 0,
+    reference_count INT DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS citations (
