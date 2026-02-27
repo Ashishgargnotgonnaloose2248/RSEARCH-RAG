@@ -15,9 +15,10 @@ headers = {
     "x-api-key": API_KEY
 }
 
+
 def fetch_cs_papers(limit=100):
     papers = []
-    batch_size = 50
+    batch_size = 50  # Maximum safe batch size
 
     params = {
         "query": "machine learning OR computer systems OR databases",
@@ -25,10 +26,30 @@ def fetch_cs_papers(limit=100):
     }
 
     for offset in range(0, limit, batch_size):
-        params["limit"] = min(batch_size, limit - offset)
+
+        params["limit"] = batch_size
         params["offset"] = offset
 
-        response = requests.get(BASE_URL, headers=headers, params=params)
+        print(f"\nFetching batch starting at offset {offset}...")
+
+        try:
+            response = requests.get(
+                BASE_URL,
+                headers=headers,
+                params=params,
+                timeout=30  # prevents hanging
+            )
+        except requests.exceptions.RequestException as e:
+            print("Connection error:", e)
+            print("Sleeping 15 seconds before retry...")
+            time.sleep(15)
+            continue
+
+        # Handle rate limiting
+        if response.status_code == 429:
+            print("Rate limited (429). Sleeping 15 seconds...")
+            time.sleep(15)
+            continue
 
         if response.status_code != 200:
             print("Error:", response.status_code)
@@ -36,17 +57,23 @@ def fetch_cs_papers(limit=100):
             break
 
         data = response.json()
+        batch = data.get("data", [])
 
-        for paper in data.get("data", []):
+        if not batch:
+            print("No more papers returned.")
+            break
+
+        for paper in batch:
             if "Computer Science" in (paper.get("fieldsOfStudy") or []):
                 papers.append(paper)
 
-        print(f"Fetched batch starting at offset {offset}")
-        time.sleep(1)
+        print(f"Batch fetched successfully. Current total: {len(papers)}")
+
+        time.sleep(3)  # important when scaling
 
     return papers
 
 
 if __name__ == "__main__":
     results = fetch_cs_papers(limit=100)
-    print(f"Fetched {len(results)} papers")
+    print(f"\nTotal papers fetched: {len(results)}")
