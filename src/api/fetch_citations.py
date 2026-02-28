@@ -13,7 +13,6 @@ if not API_KEY:
 BASE_URL = "https://api.semanticscholar.org/graph/v1/paper/"
 headers = {"x-api-key": API_KEY}
 
-# Connect to DB
 conn = psycopg2.connect(
     dbname="RagDb",
     user="postgres",
@@ -25,22 +24,25 @@ conn = psycopg2.connect(
 cur = conn.cursor()
 
 
-def fetch_references():
-    # Get ALL papers from DB
-    cur.execute("SELECT paper_id FROM papers;")
+def fetch_citations():
+    cur.execute("""
+    SELECT paper_id 
+    FROM papers
+    ORDER BY citation_count DESC NULLS LAST
+    LIMIT 300;
+""")
     paper_ids = cur.fetchall()
 
-    print(f"Total base papers: {len(paper_ids)}")
+    print(f"Processing {len(paper_ids)} papers for incoming citations")
 
     for (paper_id,) in paper_ids:
 
         url = f"{BASE_URL}{paper_id}"
-        params = {"fields": "title,year,references.paperId,references.title,references.year"}
+        params = {"fields": "citations.paperId,citations.title,citations.year"}
 
         try:
             response = requests.get(url, headers=headers, params=params, timeout=15)
-        except requests.RequestException as e:
-            print(f"Request error for {paper_id}: {e}")
+        except requests.RequestException:
             time.sleep(5)
             continue
 
@@ -50,41 +52,40 @@ def fetch_references():
             continue
 
         if response.status_code != 200:
-            print(f"Error {response.status_code} for {paper_id}")
             continue
 
         data = response.json()
-        references = data.get("references") or []
+        citations = data.get("citations") or []
 
-        for ref in references:
-            target_id = ref.get("paperId")
-            title = ref.get("title")
-            year = ref.get("year")
+        for citing in citations:
+            source_id = citing.get("paperId")
+            title = citing.get("title")
+            year = citing.get("year")
 
-            if target_id:
+            if source_id:
 
-                # Insert referenced paper if not exists
+                # Insert citing paper if not exists
                 cur.execute("""
                     INSERT INTO papers (paper_id, title, year)
                     VALUES (%s, %s, %s)
                     ON CONFLICT (paper_id) DO NOTHING;
-                """, (target_id, title, year))
+                """, (source_id, title, year))
 
-                # Insert citation edge
+                # Insert edge (incoming citation)
                 cur.execute("""
                     INSERT INTO citations (citing_paper_id, cited_paper_id)
                     VALUES (%s, %s)
                     ON CONFLICT DO NOTHING;
-                """, (paper_id, target_id))
+                """, (source_id, paper_id))
 
-        print(f"Processed references for {paper_id}")
+        print(f"Processed citations for {paper_id}")
         time.sleep(1)
 
     conn.commit()
 
 
 if __name__ == "__main__":
-    fetch_references()
+    fetch_citations()
     cur.close()
     conn.close()
-    print("Reference expansion completed.")
+    print("Citation expansion completed.")

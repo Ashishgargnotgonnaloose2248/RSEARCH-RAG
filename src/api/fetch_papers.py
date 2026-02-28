@@ -3,6 +3,7 @@ import time
 from dotenv import load_dotenv
 import os
 
+# Load API key
 load_dotenv("src/config/.env")
 
 API_KEY = os.getenv("S2_API_KEY")
@@ -16,40 +17,48 @@ headers = {
 }
 
 
-def fetch_cs_papers(limit=100):
+def fetch_cs_papers(limit=300):
     papers = []
-    batch_size = 50  # Maximum safe batch size
+    batch_size = 50  # Safe batch size for Semantic Scholar
+    offset = 0
 
     params = {
         "query": "machine learning OR computer systems OR databases",
         "fields": "paperId,title,abstract,year,citationCount,referenceCount,fieldsOfStudy"
     }
 
-    for offset in range(0, limit, batch_size):
+    while offset < limit:
 
         params["limit"] = batch_size
         params["offset"] = offset
 
-        print(f"\nFetching batch starting at offset {offset}...")
+        print(f"\nFetching batch at offset {offset}...")
 
         try:
             response = requests.get(
                 BASE_URL,
                 headers=headers,
                 params=params,
-                timeout=30  # prevents hanging
+                timeout=30
             )
         except requests.exceptions.RequestException as e:
             print("Connection error:", e)
-            print("Sleeping 15 seconds before retry...")
+            print("Retrying same batch after 15 seconds...")
             time.sleep(15)
-            continue
+            continue  # retry same offset
 
         # Handle rate limiting
         if response.status_code == 429:
             print("Rate limited (429). Sleeping 15 seconds...")
             time.sleep(15)
-            continue
+            continue  # retry same offset
+
+        # Handle server error
+        if response.status_code >= 500:
+            print("Server error:", response.status_code)
+            print("Sleeping 10 seconds before retry...")
+            time.sleep(10)
+            continue  # retry same offset
 
         if response.status_code != 200:
             print("Error:", response.status_code)
@@ -67,13 +76,14 @@ def fetch_cs_papers(limit=100):
             if "Computer Science" in (paper.get("fieldsOfStudy") or []):
                 papers.append(paper)
 
-        print(f"Batch fetched successfully. Current total: {len(papers)}")
+        print(f"Batch successful. Total papers so far: {len(papers)}")
 
-        time.sleep(3)  # important when scaling
+        offset += batch_size
+        time.sleep(3)  # Important delay for scaling
 
     return papers
 
 
 if __name__ == "__main__":
-    results = fetch_cs_papers(limit=100)
-    print(f"\nTotal papers fetched: {len(results)}")
+    results = fetch_cs_papers(limit=300)
+    print(f"\nFinal total papers fetched: {len(results)}")

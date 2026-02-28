@@ -6,24 +6,16 @@ import matplotlib.pyplot as plt
 conn = psycopg2.connect(
     dbname="RagDb",
     user="postgres",
-    password="Ashishgarg22#",  # change this
+    password="Ashishgarg22#",
     host="localhost",
     port="5432"
 )
 
 cur = conn.cursor()
 
-# Create directed graph
 G = nx.DiGraph()
 
-# Fetch papers
-cur.execute("SELECT paper_id FROM papers;")
-papers = cur.fetchall()
-
-for (paper_id,) in papers:
-    G.add_node(paper_id)
-
-# Fetch citations
+# Fetch citations only (no need to fetch all nodes separately)
 cur.execute("SELECT citing_paper_id, cited_paper_id FROM citations;")
 citations = cur.fetchall()
 
@@ -33,33 +25,33 @@ for source, target in citations:
 cur.close()
 conn.close()
 
-print("Nodes:", G.number_of_nodes())
-print("Edges:", G.number_of_edges())
+print("Total Nodes:", G.number_of_nodes())
+print("Total Edges:", G.number_of_edges())
 
-# Convert to undirected to detect connected components
-undirected = G.to_undirected()
+# -------------------------------
+# Select Top 800 High-Degree Nodes
+# -------------------------------
 
-# Get the largest connected component
-largest_component_nodes = max(nx.connected_components(undirected), key=len)
+degree_dict = dict(G.degree())
+top_nodes = sorted(degree_dict, key=degree_dict.get, reverse=True)[:800]
 
-# Create subgraph of largest component
-H = G.subgraph(largest_component_nodes)
+H = G.subgraph(top_nodes)
 
-print("Largest Component Nodes:", H.number_of_nodes())
-print("Largest Component Edges:", H.number_of_edges())
+print("Subgraph Nodes:", H.number_of_nodes())
+print("Subgraph Edges:", H.number_of_edges())
 
-# Draw graph
-plt.figure(figsize=(10, 8))
+# Draw
+plt.figure(figsize=(12, 10))
 
-pos = nx.spring_layout(H, k=0.3, seed=42)
+pos = nx.spring_layout(H, k=0.25, seed=42)
 
 nx.draw(
     H,
     pos,
+    node_size=15,
     with_labels=False,
-    node_size=120,
-    arrows=True
+    arrows=False
 )
 
-plt.title("Largest Connected Component - Citation Graph")
+plt.title("Top 800 High-Degree Papers - Citation Network")
 plt.show()

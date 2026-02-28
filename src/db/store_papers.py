@@ -11,7 +11,12 @@ conn = psycopg2.connect(
 
 cur = conn.cursor()
 
-papers = fetch_cs_papers(limit=100)
+print("Fetching papers from API...")
+papers = fetch_cs_papers(limit=300)
+
+print(f"Inserting {len(papers)} papers into database...")
+
+inserted = 0
 
 for p in papers:
     cur.execute("""
@@ -27,8 +32,10 @@ for p in papers:
         p.get("referenceCount")
     ))
 
+    inserted += 1
+
 conn.commit()
 cur.close()
 conn.close()
 
-print("Papers inserted successfully.")
+print(f"Papers inserted successfully. Total processed: {inserted}")
