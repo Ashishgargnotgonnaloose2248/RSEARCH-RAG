@@ -9,5 +9,8 @@ Created a real graph of the papers.
 Verified the correctness of graph by making a degree distribution graph and verified it using power law.
 Created a Comparision method using "PaperRank", in which papers will be given rank based on the number of citations of the paper.
 
+//01/03/2026
+Cleaned the database, and added meaningful data.
+Added GPU processsing for the SciBert Embeddings.
 
 

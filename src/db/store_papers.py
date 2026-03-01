@@ -12,7 +12,7 @@ conn = psycopg2.connect(
 cur = conn.cursor()
 
 print("Fetching papers from API...")
-papers = fetch_cs_papers(limit=300)
+papers = fetch_cs_papers(limit=800)
 
 print(f"Inserting {len(papers)} papers into database...")
 

@@ -3,7 +3,6 @@ import time
 from dotenv import load_dotenv
 import os
 
-# Load API key
 load_dotenv("src/config/.env")
 
 API_KEY = os.getenv("S2_API_KEY")
@@ -17,9 +16,9 @@ headers = {
 }
 
 
-def fetch_cs_papers(limit=300):
+def fetch_cs_papers(limit=800):
     papers = []
-    batch_size = 50  # Safe batch size for Semantic Scholar
+    batch_size = 50
     offset = 0
 
     params = {
@@ -43,22 +42,19 @@ def fetch_cs_papers(limit=300):
             )
         except requests.exceptions.RequestException as e:
             print("Connection error:", e)
-            print("Retrying same batch after 15 seconds...")
+            print("Retrying after 15 seconds...")
             time.sleep(15)
-            continue  # retry same offset
+            continue
 
-        # Handle rate limiting
         if response.status_code == 429:
-            print("Rate limited (429). Sleeping 15 seconds...")
+            print("Rate limited. Sleeping 15 seconds...")
             time.sleep(15)
-            continue  # retry same offset
+            continue
 
-        # Handle server error
         if response.status_code >= 500:
-            print("Server error:", response.status_code)
-            print("Sleeping 10 seconds before retry...")
+            print("Server error. Retrying...")
             time.sleep(10)
-            continue  # retry same offset
+            continue
 
         if response.status_code != 200:
             print("Error:", response.status_code)
@@ -73,17 +69,20 @@ def fetch_cs_papers(limit=300):
             break
 
         for paper in batch:
-            if "Computer Science" in (paper.get("fieldsOfStudy") or []):
+            if (
+                paper.get("abstract") is not None
+                and "Computer Science" in (paper.get("fieldsOfStudy") or [])
+            ):
                 papers.append(paper)
 
-        print(f"Batch successful. Total papers so far: {len(papers)}")
+        print(f"Valid papers so far: {len(papers)}")
 
         offset += batch_size
-        time.sleep(3)  # Important delay for scaling
+        time.sleep(3)
 
     return papers
 
 
 if __name__ == "__main__":
-    results = fetch_cs_papers(limit=300)
-    print(f"\nFinal total papers fetched: {len(results)}")
+    results = fetch_cs_papers(limit=800)
+    print(f"\nFinal total valid papers fetched: {len(results)}")

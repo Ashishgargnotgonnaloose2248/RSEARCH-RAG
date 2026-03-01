@@ -4,6 +4,7 @@ import psycopg2
 from dotenv import load_dotenv
 import os
 
+# Load API key
 load_dotenv("src/config/.env")
 
 API_KEY = os.getenv("S2_API_KEY")
@@ -13,7 +14,7 @@ if not API_KEY:
 BASE_URL = "https://api.semanticscholar.org/graph/v1/paper/"
 headers = {"x-api-key": API_KEY}
 
-# Connect to DB
+# Connect to PostgreSQL
 conn = psycopg2.connect(
     dbname="RagDb",
     user="postgres",
@@ -25,28 +26,44 @@ conn = psycopg2.connect(
 cur = conn.cursor()
 
 
-def fetch_references():
-    # Get ALL papers from DB
+def fetch_references(max_refs_per_paper=30):
+
+    # Fetch all seed papers
     cur.execute("SELECT paper_id FROM papers;")
     paper_ids = cur.fetchall()
 
-    print(f"Total base papers: {len(paper_ids)}")
+    print(f"Total seed papers: {len(paper_ids)}")
+
+    processed = 0
 
     for (paper_id,) in paper_ids:
 
         url = f"{BASE_URL}{paper_id}"
-        params = {"fields": "title,year,references.paperId,references.title,references.year"}
+        params = {
+            "fields": "references.paperId,references.title,references.abstract,references.year"
+        }
 
         try:
-            response = requests.get(url, headers=headers, params=params, timeout=15)
+            response = requests.get(
+                url,
+                headers=headers,
+                params=params,
+                timeout=15
+            )
         except requests.RequestException as e:
             print(f"Request error for {paper_id}: {e}")
             time.sleep(5)
             continue
 
+        # Handle rate limiting
         if response.status_code == 429:
             print("Rate limited. Sleeping 10 seconds...")
             time.sleep(10)
+            continue
+
+        if response.status_code >= 500:
+            print(f"Server error {response.status_code}. Retrying...")
+            time.sleep(5)
             continue
 
         if response.status_code != 200:
@@ -56,19 +73,24 @@ def fetch_references():
         data = response.json()
         references = data.get("references") or []
 
+        # 🔥 LIMIT references per paper
+        references = references[:max_refs_per_paper]
+
         for ref in references:
             target_id = ref.get("paperId")
             title = ref.get("title")
+            abstract = ref.get("abstract")
             year = ref.get("year")
 
-            if target_id:
+            # Only insert if abstract exists (important for GNN stage)
+            if target_id and abstract:
 
-                # Insert referenced paper if not exists
+                # Insert referenced paper
                 cur.execute("""
-                    INSERT INTO papers (paper_id, title, year)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO papers (paper_id, title, abstract, year)
+                    VALUES (%s, %s, %s, %s)
                     ON CONFLICT (paper_id) DO NOTHING;
-                """, (target_id, title, year))
+                """, (target_id, title, abstract, year))
 
                 # Insert citation edge
                 cur.execute("""
@@ -77,14 +99,22 @@ def fetch_references():
                     ON CONFLICT DO NOTHING;
                 """, (paper_id, target_id))
 
+        processed += 1
+
+        # Commit every 20 papers (safer for large runs)
+        if processed % 20 == 0:
+            conn.commit()
+            print(f"Committed at {processed} papers")
+
         print(f"Processed references for {paper_id}")
-        time.sleep(1)
+        time.sleep(1)  # Prevent API abuse
 
     conn.commit()
+    print("All references processed and committed.")
 
 
 if __name__ == "__main__":
-    fetch_references()
+    fetch_references(max_refs_per_paper=30)
     cur.close()
     conn.close()
-    print("Reference expansion completed.")
+    print("Reference expansion completed successfully.")
