@@ -13,4 +13,9 @@ Created a Comparision method using "PaperRank", in which papers will be given ra
 Cleaned the database, and added meaningful data.
 Added GPU processsing for the SciBert Embeddings.
 
+//03/03/2026
+Did some changes in build graph,to show better analytics.
+Also added vector emeddings to each paper.
+
+
 
