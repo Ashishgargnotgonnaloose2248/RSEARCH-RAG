@@ -17,5 +17,13 @@ Added GPU processsing for the SciBert Embeddings.
 Did some changes in build graph,to show better analytics.
 Also added vector emeddings to each paper.
 
+//04/03/26
+Created a proper pipeline for retrieval of top relevant papers and also for retireval changed the criteria from just citation to both citation count and pagerank
+
+//05/03/26
+Implemented hybrid research paper retrieval by combining SciBERT semantic similarity (FAISS vector search) with citation-based PageRank from the citation graph.
+This improves search quality by ranking papers not only by textual relevance but also by their influence in the research network.
+(ISSE YE HELP HOTI HAI KI PAPER SIRF TOPIC SE RELEVANT HI NHI, BALKI USKE ANDAR KI QUALITY CHECK BHI HOTI HAI using a formula of Hybrid = alpha x semantic + beta x pagerank, where alpha = 0.7 and beta = 0.3,)
+
 
 
