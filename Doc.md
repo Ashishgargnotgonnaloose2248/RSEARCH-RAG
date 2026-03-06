@@ -25,5 +25,10 @@ Implemented hybrid research paper retrieval by combining SciBERT semantic simila
 This improves search quality by ranking papers not only by textual relevance but also by their influence in the research network.
 (ISSE YE HELP HOTI HAI KI PAPER SIRF TOPIC SE RELEVANT HI NHI, BALKI USKE ANDAR KI QUALITY CHECK BHI HOTI HAI using a formula of Hybrid = alpha x semantic + beta x pagerank, where alpha = 0.7 and beta = 0.3,)
 
+//06/03/26
+Converting PostgreSQL citations to PyTorch graph.(src/gnn/build_graph_dataset)
+We generated graph-aware embeddings for each paper using a Graph Convolutional Network (GCN) trained on the citation graph. These embeddings capture structural relationships between papers, enabling the retrieval system to consider citation context in addition to semantic similarity and PageRank.
+
+
 
 

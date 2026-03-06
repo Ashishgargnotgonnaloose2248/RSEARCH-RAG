@@ -7,8 +7,9 @@ from transformers import AutoTokenizer, AutoModel
 # -----------------------------
 # CONFIG
 # -----------------------------
-ALPHA = 0.7  # semantic weight
-BETA = 0.3   # pagerank weight
+ALPHA = 0.6   # semantic weight
+BETA = 0.2    # pagerank weight
+GAMMA = 0.2   # gnn weight
 
 # -----------------------------
 # DATABASE CONNECTION
@@ -20,6 +21,7 @@ conn = psycopg2.connect(
     host="localhost",
     port="5432"
 )
+
 cur = conn.cursor()
 
 # -----------------------------
@@ -40,6 +42,17 @@ model.eval()
 # -----------------------------
 index = faiss.read_index("faiss_index.bin")
 paper_ids = np.load("paper_ids.npy")
+
+# -----------------------------
+# LOAD GNN EMBEDDINGS
+# -----------------------------
+gnn_embeddings = torch.load("gnn_embeddings.pt").numpy()
+gnn_paper_ids = np.load("paper_ids_gnn.npy")
+
+print("Loaded GNN embeddings:", gnn_embeddings.shape)
+
+# Map paper_id → index
+gnn_id_to_index = {pid: i for i, pid in enumerate(gnn_paper_ids)}
 
 # -----------------------------
 # EMBEDDING FUNCTION
@@ -71,12 +84,13 @@ def search(query, top_k=5):
 
     query_vec = embed_query(query)
 
-    # Retrieve top 50 semantic matches
+    # Retrieve semantic candidates
     scores, indices = index.search(query_vec, 50)
 
     results = []
 
     for idx, score in zip(indices[0], scores[0]):
+
         paper_id = paper_ids[idx]
         similarity = float(score)
 
@@ -107,20 +121,55 @@ def search(query, top_k=5):
     min_pr = min(pr_values) if pr_values else 0
 
     # -----------------------------
+    # COMPUTE GNN SCORES
+    # -----------------------------
+    gnn_scores = []
+
+    for pid in paper_id_list:
+        idx = gnn_id_to_index.get(pid)
+        if idx is not None:
+            gnn_scores.append(np.linalg.norm(gnn_embeddings[idx]))
+
+    max_gnn = max(gnn_scores) if gnn_scores else 1
+    min_gnn = min(gnn_scores) if gnn_scores else 0
+
+    # -----------------------------
     # HYBRID SCORING
     # -----------------------------
     hybrid_results = []
 
     for paper_id, similarity in results:
 
+        # PageRank
         pagerank = pagerank_dict.get(paper_id, 0.0)
-
         normalized_pr = (pagerank - min_pr) / (max_pr - min_pr + 1e-8)
 
-        final_score = ALPHA * similarity + BETA * normalized_pr
+        # GNN importance
+        gnn_idx = gnn_id_to_index.get(paper_id)
+
+        if gnn_idx is not None:
+            gnn_vector = gnn_embeddings[gnn_idx]
+            gnn_score = np.linalg.norm(gnn_vector)
+        else:
+            gnn_score = 0.0
+
+        normalized_gnn = (gnn_score - min_gnn) / (max_gnn - min_gnn + 1e-8)
+
+        # Final hybrid score
+        final_score = (
+            ALPHA * similarity +
+            BETA * normalized_pr +
+            GAMMA * normalized_gnn
+        )
 
         hybrid_results.append(
-            (paper_id, final_score, similarity, normalized_pr)
+            (
+                paper_id,
+                final_score,
+                similarity,
+                normalized_pr,
+                normalized_gnn
+            )
         )
 
     # -----------------------------
@@ -135,13 +184,14 @@ def search(query, top_k=5):
 
     for i in range(top_k):
 
-        paper_id, final_score, sim, pr = hybrid_results[i]
+        paper_id, final_score, sim, pr, gnn = hybrid_results[i]
 
         print(
             "Paper ID:", paper_id,
             "| Hybrid:", round(final_score, 4),
             "| Semantic:", round(sim, 4),
-            "| PageRank:", round(pr, 4)
+            "| PageRank:", round(pr, 4),
+            "| GNN:", round(gnn, 4)
         )
 
 
