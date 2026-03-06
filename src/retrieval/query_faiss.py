@@ -2,14 +2,16 @@ import numpy as np
 import faiss
 import torch
 import psycopg2
-from transformers import AutoTokenizer, AutoModel
+from transformers import AutoTokenizer, AutoModel, AutoModelForSeq2SeqLM
 
 # -----------------------------
 # CONFIG
 # -----------------------------
-ALPHA = 0.6   # semantic weight
-BETA = 0.2    # pagerank weight
-GAMMA = 0.2   # gnn weight
+ALPHA = 0.6
+BETA = 0.2
+GAMMA = 0.2
+
+TOP_K_CONTEXT = 5
 
 # -----------------------------
 # DATABASE CONNECTION
@@ -25,17 +27,36 @@ conn = psycopg2.connect(
 cur = conn.cursor()
 
 # -----------------------------
-# LOAD MODEL (SciBERT)
+# DEVICE
 # -----------------------------
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_uncased")
-model = AutoModel.from_pretrained(
+# -----------------------------
+# LOAD EMBEDDING MODEL (SciBERT)
+# -----------------------------
+embed_tokenizer = AutoTokenizer.from_pretrained(
+    "allenai/scibert_scivocab_uncased"
+)
+
+embed_model = AutoModel.from_pretrained(
     "allenai/scibert_scivocab_uncased",
     use_safetensors=True
 ).to(device)
 
-model.eval()
+embed_model.eval()
+
+# -----------------------------
+# LOAD GENERATION MODEL (RAG)
+# -----------------------------
+gen_tokenizer = AutoTokenizer.from_pretrained(
+    "google/flan-t5-base"
+)
+
+gen_model = AutoModelForSeq2SeqLM.from_pretrained(
+    "google/flan-t5-base"
+).to(device)
+
+gen_model.eval()
 
 # -----------------------------
 # LOAD FAISS INDEX
@@ -51,7 +72,6 @@ gnn_paper_ids = np.load("paper_ids_gnn.npy")
 
 print("Loaded GNN embeddings:", gnn_embeddings.shape)
 
-# Map paper_id → index
 gnn_id_to_index = {pid: i for i, pid in enumerate(gnn_paper_ids)}
 
 # -----------------------------
@@ -59,7 +79,7 @@ gnn_id_to_index = {pid: i for i, pid in enumerate(gnn_paper_ids)}
 # -----------------------------
 def embed_query(text):
 
-    inputs = tokenizer(
+    inputs = embed_tokenizer(
         text,
         return_tensors="pt",
         truncation=True,
@@ -67,7 +87,7 @@ def embed_query(text):
     ).to(device)
 
     with torch.no_grad():
-        outputs = model(**inputs)
+        outputs = embed_model(**inputs)
         embedding = outputs.last_hidden_state.mean(dim=1)
 
     embedding = embedding.cpu().numpy().astype("float32")
@@ -78,13 +98,93 @@ def embed_query(text):
 
 
 # -----------------------------
+# FETCH PAPER TEXT
+# -----------------------------
+def fetch_paper_details(paper_ids):
+
+    cur.execute(
+        """
+        SELECT paper_id, title, abstract
+        FROM papers
+        WHERE paper_id = ANY(%s)
+        """,
+        (paper_ids,)
+    )
+
+    rows = cur.fetchall()
+
+    paper_dict = {}
+
+    for pid, title, abstract in rows:
+
+        text = ""
+
+        if title:
+            text += title + ". "
+
+        if abstract:
+            text += abstract
+
+        paper_dict[pid] = text
+
+    return paper_dict
+
+
+# -----------------------------
+# GENERATE RAG ANSWER
+# -----------------------------
+def generate_answer(query, contexts):
+
+    context_text = "\n\n".join(contexts)
+
+    prompt = f"""
+You are a research assistant.
+
+Using the research paper abstracts below, answer the question clearly.
+
+Question:
+{query}
+
+Research Paper Abstracts:
+{context_text}
+
+Instructions:
+- Summarize key ideas from the papers
+- Explain the concept clearly
+- Mention important techniques if present
+
+Answer:
+"""
+
+    inputs = gen_tokenizer(
+        prompt,
+        return_tensors="pt",
+        truncation=True,
+        max_length=1024
+    ).to(device)
+
+    with torch.no_grad():
+
+        outputs = gen_model.generate(
+            **inputs,
+            max_new_tokens=200
+        )
+
+    answer = gen_tokenizer.decode(
+        outputs[0],
+        skip_special_tokens=True
+    )
+
+    return answer
+
+
+# -----------------------------
 # HYBRID SEARCH
 # -----------------------------
 def search(query, top_k=5):
 
     query_vec = embed_query(query)
 
-    # Retrieve semantic candidates
     scores, indices = index.search(query_vec, 50)
 
     results = []
@@ -96,11 +196,11 @@ def search(query, top_k=5):
 
         results.append((paper_id, similarity))
 
+    paper_id_list = [r[0] for r in results]
+
     # -----------------------------
     # FETCH PAGERANK
     # -----------------------------
-    paper_id_list = [r[0] for r in results]
-
     cur.execute(
         """
         SELECT paper_id, pagerank_score
@@ -112,21 +212,20 @@ def search(query, top_k=5):
 
     pagerank_dict = dict(cur.fetchall())
 
-    # -----------------------------
-    # NORMALIZE PAGERANK
-    # -----------------------------
     pr_values = list(pagerank_dict.values())
 
     max_pr = max(pr_values) if pr_values else 1
     min_pr = min(pr_values) if pr_values else 0
 
     # -----------------------------
-    # COMPUTE GNN SCORES
+    # GNN SCORES
     # -----------------------------
     gnn_scores = []
 
     for pid in paper_id_list:
+
         idx = gnn_id_to_index.get(pid)
+
         if idx is not None:
             gnn_scores.append(np.linalg.norm(gnn_embeddings[idx]))
 
@@ -134,17 +233,16 @@ def search(query, top_k=5):
     min_gnn = min(gnn_scores) if gnn_scores else 0
 
     # -----------------------------
-    # HYBRID SCORING
+    # HYBRID SCORE
     # -----------------------------
     hybrid_results = []
 
     for paper_id, similarity in results:
 
-        # PageRank
         pagerank = pagerank_dict.get(paper_id, 0.0)
+
         normalized_pr = (pagerank - min_pr) / (max_pr - min_pr + 1e-8)
 
-        # GNN importance
         gnn_idx = gnn_id_to_index.get(paper_id)
 
         if gnn_idx is not None:
@@ -155,7 +253,6 @@ def search(query, top_k=5):
 
         normalized_gnn = (gnn_score - min_gnn) / (max_gnn - min_gnn + 1e-8)
 
-        # Final hybrid score
         final_score = (
             ALPHA * similarity +
             BETA * normalized_pr +
@@ -172,15 +269,11 @@ def search(query, top_k=5):
             )
         )
 
-    # -----------------------------
-    # SORT RESULTS
-    # -----------------------------
-    hybrid_results.sort(
-        key=lambda x: x[1],
-        reverse=True
-    )
+    hybrid_results.sort(key=lambda x: x[1], reverse=True)
 
     print("\nTop Hybrid Results:\n")
+
+    top_papers = []
 
     for i in range(top_k):
 
@@ -193,6 +286,30 @@ def search(query, top_k=5):
             "| PageRank:", round(pr, 4),
             "| GNN:", round(gnn, 4)
         )
+
+        top_papers.append(paper_id)
+
+    # -----------------------------
+    # FETCH PAPER CONTENT
+    # -----------------------------
+    paper_texts = fetch_paper_details(top_papers)
+
+    contexts = [paper_texts[p] for p in top_papers if p in paper_texts]
+
+    # -----------------------------
+    # GENERATE RAG ANSWER
+    # -----------------------------
+    print("\nGenerating Research Answer...\n")
+
+    answer = generate_answer(query, contexts)
+
+    print("RAG Answer:\n")
+    print(answer)
+
+    print("\nSources:\n")
+
+    for i, pid in enumerate(top_papers):
+     print(f"[{i+1}] {pid}")
 
 
 # -----------------------------
