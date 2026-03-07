@@ -8,8 +8,8 @@ from transformers import AutoTokenizer, AutoModel, AutoModelForSeq2SeqLM
 # CONFIG
 # -----------------------------
 ALPHA = 0.6
-BETA = 0.2
-GAMMA = 0.2
+BETA = 0.3
+GAMMA = 0.1
 
 TOP_K_CONTEXT = 5
 
@@ -72,7 +72,7 @@ gnn_paper_ids = np.load("paper_ids_gnn.npy")
 
 print("Loaded GNN embeddings:", gnn_embeddings.shape)
 
-gnn_id_to_index = {pid: i for i, pid in enumerate(gnn_paper_ids)}
+gnn_id_to_index = {str(pid): i for i, pid in enumerate(gnn_paper_ids)}
 
 # -----------------------------
 # EMBEDDING FUNCTION
@@ -191,7 +191,7 @@ def search(query, top_k=5):
 
     for idx, score in zip(indices[0], scores[0]):
 
-        paper_id = paper_ids[idx]
+        paper_id = str(paper_ids[idx])
         similarity = float(score)
 
         results.append((paper_id, similarity))
@@ -310,6 +310,8 @@ def search(query, top_k=5):
 
     for i, pid in enumerate(top_papers):
      print(f"[{i+1}] {pid}")
+    
+    return top_papers
 
 
 # -----------------------------
