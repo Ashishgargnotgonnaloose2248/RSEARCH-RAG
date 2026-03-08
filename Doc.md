@@ -29,6 +29,9 @@ This improves search quality by ranking papers not only by textual relevance but
 Converting PostgreSQL citations to PyTorch graph.(src/gnn/build_graph_dataset)
 We generated graph-aware embeddings for each paper using a Graph Convolutional Network (GCN) trained on the citation graph. These embeddings capture structural relationships between papers, enabling the retrieval system to consider citation context in addition to semantic similarity and PageRank.
 
+//07/03/26
+Did some changes in query_faiss and mainly worked on Evaluation metrics.
+
 
 
 
